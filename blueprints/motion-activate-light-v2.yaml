@@ -1,5 +1,5 @@
 blueprint:
-  name: Motion-Activated Light or Switch
+  name: Motion-Activated Light or Switch v2
   description: Turn off light or switch after motion stops, with an option to disable automatic turn-on when motion is detected.
   domain: automation
   input:
