@@ -68,7 +68,7 @@ action:
           value_template: "{{ timeout_seconds <= 0 }}"
         - condition: template
           value_template: "{{ timeout_seconds <= 0 and active_motions == false }}"
-      - variables:
+        - variables:
             timeout_seconds: "{{ timeout_seconds - 1 }}"
   - service: "turn_off"
     target:
