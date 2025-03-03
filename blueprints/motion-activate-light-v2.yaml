@@ -1,26 +1,18 @@
 blueprint:
-  name: Motion-Activated Switch or Light
-  description: Automatically turn on a light or switch when motion is detected, with adjustable timeout and optional auto-on.
+  name: Motion-Activated Light/Switch
+  description: Turns on a light or switch when motion is detected and turns it off after a period of inactivity.
   domain: automation
   input:
     motion_sensors:
       name: Motion Sensors
-      description: List of motion sensors to trigger the automation.
+      description: The motion sensor(s) to trigger the automation.
       selector:
         entity:
           domain: binary_sensor
+          device_class: motion
           multiple: true
-    target_domain:
-      name: Target Domain
-      description: Choose whether to control a light or switch.
-      default: light
-      selector:
-        select:
-          options:
-            - light
-            - switch
     target_entity:
-      name: Target Entity
+      name: Target Light/Switch
       description: The light or switch to control.
       selector:
         entity:
@@ -29,48 +21,55 @@ blueprint:
             - switch
     auto_on:
       name: Auto-On
-      description: Automatically turn on the target when motion is detected.
-      default: true
+      description: Turn on the target entity when motion is detected.
       selector:
-        boolean:
+        boolean: {}
+      default: true
     timeout:
       name: Timeout (seconds)
-      description: Time in seconds before the target turns off after no motion is detected.
-      default: 300
+      description: Time to wait after the last motion before turning off the target.
       selector:
         number:
+          unit_of_measurement: seconds
           min: 1
           max: 3600
           step: 1
-          unit_of_measurement: s
+      default: 120
 
 trigger:
   - platform: state
     entity_id: !input motion_sensors
     to: "on"
 
-condition: []
 action:
   - choose:
       - conditions:
-          - condition: state
-            entity_id: !input target_entity
-            state: "off"
           - condition: template
             value_template: "{{ auto_on }}"
         sequence:
-          - service: !input "{{ 'light.turn_on' if target_domain == 'light' else 'switch.turn_on' }}"
+          - service: "turn_on"
             target:
               entity_id: !input target_entity
-  - wait_for_trigger:
-      - platform: state
-        entity_id: !input motion_sensors
-        to: "off"
-        for:
-          seconds: !input timeout
-    continue_on_timeout: false
-  - service: !input "{{ 'light.turn_off' if target_domain == 'light' else 'switch.turn_off' }}"
+  - alias: Reset and Restart Timer
+    variables:
+      timeout_seconds: !input timeout
+    repeat:
+      sequence:
+        - delay:
+            seconds: 1
+        - variables:
+            active_motions: >-
+              {% set motions = expand(motion_sensors) | selectattr('state','eq','on') | list %}
+              {{ motions | length > 0 }}
+      until:
+        - condition: template
+          value_template: "{{ not active_motions }}"
+        - condition: template
+          value_template: "{{ timeout_seconds <= 0 }}"
+        - condition: template
+          value_template: "{{ timeout_seconds <= 0 and active_motions == false }}"
+      - variables:
+            timeout_seconds: "{{ timeout_seconds - 1 }}"
+  - service: "turn_off"
     target:
       entity_id: !input target_entity
-
-mode: restart
