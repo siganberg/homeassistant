@@ -47,23 +47,18 @@ blueprint:
       entity_id: !input motion_sensors
       to: 'on'
 
-  condition:
-    - condition: template
-      value_template: "{{ not (states('input_boolean.auto_on_enabled') == 'off' and states('binary_sensor.motion') == 'off') }}"
-
   action:
     - choose:
         - conditions:
             - condition: state
-              entity_id: input_boolean.auto_on_enabled
+              entity_id: !input auto_on_enabled
               state: 'on'
           sequence:
-            - service: light.turn_on
+            - service: homeassistant.turn_on
               target:
                 entity_id: !input target_entity
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.auto_on_enabled
-              state: 'off'
-          sequence:
-            - service: turn_off
+    - delay:
+        seconds: !input timeout
+    - service: homeassistant.turn_off
+      target:
+        entity_id: !input target_entity
