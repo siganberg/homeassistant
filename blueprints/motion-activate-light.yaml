@@ -1,74 +1,98 @@
 blueprint:
-  name: Motion-Activated Light or Switch
-  description: Turn on light or switch when motion is detected and reset the timer with new motion.
+  name: Motion-Activated Switch or Light with Timeout Reset
+  description: >-
+    A blueprint to control a light or switch using motion sensors.
+    Supports multiple sensors, auto-on/off, and an option to disable auto-on.
+    Automatically resets the timeout if motion is detected again.
   domain: automation
   input:
-    motion_sensor:
-      name: Motion Sensor
-      description: The motion sensor to trigger the automation.
+    motion_sensors:
+      name: Motion Sensors
+      description: List of motion sensors to trigger the automation.
       selector:
         entity:
           domain: binary_sensor
-          device_class: motion
-    light_or_switch:
-      name: Light or Switch
-      description: The light or switch to turn on.
+          multiple: true
+    target_entity:
+      name: Target Entity
+      description: The light or switch to control.
       selector:
         entity:
           domain:
             - light
             - switch
-    timeout:
-      name: Timeout (Seconds)
-      description: How long the light/switch should stay on before turning off if no motion is detected.
-      default: 60
-      selector:
-        number:
-          min: 10
-          max: 600
-          unit_of_measurement: seconds
-          step: 10
-    auto_turn_on:
-      name: Auto Turn On
-      description: If enabled, the light/switch will automatically turn on when motion is detected.
+    auto_on:
+      name: Enable Auto-On
+      description: Automatically turn on the target entity when motion is detected.
       default: true
       selector:
-        boolean: {}
+        boolean:
+    auto_off_timeout:
+      name: Auto-Off Timeout
+      description: Time (in seconds) to wait before turning off the target entity after no motion is detected.
+      default: 120
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+
+variables:
+  timeout: !input auto_off_timeout
 
 trigger:
   - platform: state
-    entity_id: !input motion_sensor
+    entity_id: !input motion_sensors
     to: "on"
-    
-condition:
-  - condition: state
-    entity_id: !input light_or_switch
-    state: "off"
-  - condition: template
-    value_template: "{{ is_state('!input auto_turn_on', 'true') }}"
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "off"
+
+condition: []
 
 action:
-  - service: >
-      {% if is_state('!input light_or_switch', 'on') %}
-        light.turn_on
-      {% else %}
-        switch.turn_on
-      {% endif %}
-    target:
-      entity_id: !input light_or_switch
-  - wait_for_trigger:
-      - platform: state
-        entity_id: !input motion_sensor
-        to: "off"
-  - delay: 
-      seconds: !input timeout
-  - service: >
-      {% if is_state('!input light_or_switch', 'on') %}
-        light.turn_off
-      {% else %}
-        switch.turn_off
-      {% endif %}
-    target:
-      entity_id: !input light_or_switch
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "0"  # Motion detected
+        sequence:
+          - service: >
+              {% if is_state(target_entity, 'off') and auto_on %}
+                {{ 'light.turn_on' if target_entity.split('.')[0] == 'light' else 'switch.turn_on' }}
+              {% else %}
+                noop
+              {% endif %}
+            target:
+              entity_id: !input target_entity
+          - service: script.turn_on
+            target:
+              entity_id: script.reset_motion_timeout
+            data:
+              variables:
+                target_entity: !input target_entity
+                timeout: !input auto_off_timeout
+      - conditions:
+          - condition: trigger
+            id: "1"  # Motion off
+        sequence:
+          - service: script.turn_on
+            target:
+              entity_id: script.reset_motion_timeout
+            data:
+              variables:
+                target_entity: !input target_entity
+                timeout: !input auto_off_timeout
+    default: []
 
-mode: restart
+script:
+  reset_motion_timeout:
+    mode: restart
+    sequence:
+      - wait_for_trigger:
+          - platform: state
+            entity_id: !input motion_sensors
+            to: "on"
+      - service: >
+          {{ 'light.turn_off' if target_entity.split('.')[0] == 'light' else 'switch.turn_off' }}
+        target:
+          entity_id: !input target_entity

@@ -1,10 +1,9 @@
 blueprint:
-  name: Motion Activated Switch/Light
-  description: >
-    This blueprint creates a motion-activated automation for turning on lights or switches
-    when motion is detected. It supports multiple sensors and targets (light or switch).
-    Option to disable Auto-On and just perform Auto-Off based on timeout settings.
-
+  name: Motion-Activated Switch or Light with Timeout Reset
+  description: >-
+    A blueprint to control a light or switch using motion sensors.
+    Supports multiple sensors, auto-on/off, and an option to disable auto-on.
+    Automatically resets the timeout if motion is detected again.
   domain: automation
   input:
     motion_sensors:
@@ -14,7 +13,6 @@ blueprint:
         entity:
           domain: binary_sensor
           multiple: true
-
     target_entity:
       name: Target Entity
       description: The light or switch to control.
@@ -23,42 +21,78 @@ blueprint:
           domain:
             - light
             - switch
-
-    auto_on_enabled:
-      name: Auto-On Enabled
-      description: Enable or disable auto-on functionality.
+    auto_on:
+      name: Enable Auto-On
+      description: Automatically turn on the target entity when motion is detected.
       default: true
       selector:
-        boolean: {}
-
-    timeout:
+        boolean:
+    auto_off_timeout:
       name: Auto-Off Timeout
-      description: Time in seconds before the light or switch is turned off after no motion is detected.
-      default: 60
+      description: Time (in seconds) to wait before turning off the target entity after no motion is detected.
+      default: 120
       selector:
         number:
           min: 1
           max: 3600
-          unit_of_measurement: seconds
-          mode: slider
+          unit_of_measurement: s
 
-  trigger:
-    - platform: state
-      entity_id: !input motion_sensors
-      to: 'on'
+variables:
+  timeout: !input auto_off_timeout
 
-  action:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: !input auto_on_enabled
-              state: 'on'
-          sequence:
-            - service: homeassistant.turn_on
-              target:
-                entity_id: !input target_entity
-    - delay:
-        seconds: !input timeout
-    - service: homeassistant.turn_off
-      target:
-        entity_id: !input target_entity
+trigger:
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "on"
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "off"
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "0"  # Motion detected
+        sequence:
+          - service: >
+              {% if is_state(target_entity, 'off') and auto_on %}
+                {{ 'light.turn_on' if target_entity.split('.')[0] == 'light' else 'switch.turn_on' }}
+              {% else %}
+                noop
+              {% endif %}
+            target:
+              entity_id: !input target_entity
+          - service: script.turn_on
+            target:
+              entity_id: script.reset_motion_timeout
+            data:
+              variables:
+                target_entity: !input target_entity
+                timeout: !input auto_off_timeout
+      - conditions:
+          - condition: trigger
+            id: "1"  # Motion off
+        sequence:
+          - service: script.turn_on
+            target:
+              entity_id: script.reset_motion_timeout
+            data:
+              variables:
+                target_entity: !input target_entity
+                timeout: !input auto_off_timeout
+    default: []
+
+script:
+  reset_motion_timeout:
+    mode: restart
+    sequence:
+      - wait_for_trigger:
+          - platform: state
+            entity_id: !input motion_sensors
+            to: "on"
+      - service: >
+          {{ 'light.turn_off' if target_entity.split('.')[0] == 'light' else 'switch.turn_off' }}
+        target:
+          entity_id: !input target_entity
