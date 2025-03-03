@@ -1,9 +1,6 @@
 blueprint:
-  name: Motion-Activated Switch or Light with Timeout Reset
-  description: >-
-    A blueprint to control a light or switch using motion sensors.
-    Supports multiple sensors, auto-on/off, and an option to disable auto-on.
-    Automatically resets the timeout if motion is detected again.
+  name: Motion-Activated Switch or Light
+  description: Automatically turn on a light or switch when motion is detected, with adjustable timeout and optional auto-on.
   domain: automation
   input:
     motion_sensors:
@@ -13,6 +10,15 @@ blueprint:
         entity:
           domain: binary_sensor
           multiple: true
+    target_domain:
+      name: Target Domain
+      description: Choose whether to control a light or switch.
+      default: light
+      selector:
+        select:
+          options:
+            - light
+            - switch
     target_entity:
       name: Target Entity
       description: The light or switch to control.
@@ -22,77 +28,49 @@ blueprint:
             - light
             - switch
     auto_on:
-      name: Enable Auto-On
-      description: Automatically turn on the target entity when motion is detected.
+      name: Auto-On
+      description: Automatically turn on the target when motion is detected.
       default: true
       selector:
         boolean:
-    auto_off_timeout:
-      name: Auto-Off Timeout
-      description: Time (in seconds) to wait before turning off the target entity after no motion is detected.
-      default: 120
+    timeout:
+      name: Timeout (seconds)
+      description: Time in seconds before the target turns off after no motion is detected.
+      default: 300
       selector:
         number:
           min: 1
           max: 3600
+          step: 1
           unit_of_measurement: s
-
-variables:
-  timeout: !input auto_off_timeout
 
 trigger:
   - platform: state
     entity_id: !input motion_sensors
     to: "on"
-  - platform: state
-    entity_id: !input motion_sensors
-    to: "off"
 
 condition: []
-
 action:
   - choose:
       - conditions:
-          - condition: trigger
-            id: "0"  # Motion detected
+          - condition: state
+            entity_id: !input target_entity
+            state: "off"
+          - condition: template
+            value_template: "{{ auto_on }}"
         sequence:
-          - service: >
-              {% if is_state(target_entity, 'off') and auto_on %}
-                {{ 'light.turn_on' if target_entity.split('.')[0] == 'light' else 'switch.turn_on' }}
-              {% else %}
-                noop
-              {% endif %}
+          - service: !input "{{ 'light.turn_on' if target_domain == 'light' else 'switch.turn_on' }}"
             target:
               entity_id: !input target_entity
-          - service: script.turn_on
-            target:
-              entity_id: script.reset_motion_timeout
-            data:
-              variables:
-                target_entity: !input target_entity
-                timeout: !input auto_off_timeout
-      - conditions:
-          - condition: trigger
-            id: "1"  # Motion off
-        sequence:
-          - service: script.turn_on
-            target:
-              entity_id: script.reset_motion_timeout
-            data:
-              variables:
-                target_entity: !input target_entity
-                timeout: !input auto_off_timeout
-    default: []
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input motion_sensors
+        to: "off"
+        for:
+          seconds: !input timeout
+    continue_on_timeout: false
+  - service: !input "{{ 'light.turn_off' if target_domain == 'light' else 'switch.turn_off' }}"
+    target:
+      entity_id: !input target_entity
 
-script:
-  reset_motion_timeout:
-    mode: restart
-    sequence:
-      - wait_for_trigger:
-          - platform: state
-            entity_id: !input motion_sensors
-            to: "on"
-      - service: >
-          {{ 'light.turn_off' if target_entity.split('.')[0] == 'light' else 'switch.turn_off' }}
-        target:
-          entity_id: !input target_entity
+mode: restart
