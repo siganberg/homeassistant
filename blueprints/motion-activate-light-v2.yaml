@@ -1,74 +1,69 @@
 blueprint:
-  name: Motion-Activated Light or Switch v2
-  description: Turn off light or switch after motion stops, with an option to disable automatic turn-on when motion is detected.
+  name: Motion Activated Switch/Light
+  description: >
+    This blueprint creates a motion-activated automation for turning on lights or switches
+    when motion is detected. It supports multiple sensors and targets (light or switch).
+    Option to disable Auto-On and just perform Auto-Off based on timeout settings.
+
   domain: automation
   input:
     motion_sensors:
       name: Motion Sensors
-      description: The motion sensors to trigger the automation.
+      description: List of motion sensors to trigger the automation.
       selector:
         entity:
           domain: binary_sensor
-          device_class: motion
           multiple: true
-    light_or_switch:
-      name: Light or Switch
-      description: The light or switch to turn off.
+
+    target_entity:
+      name: Target Entity
+      description: The light or switch to control.
       selector:
         entity:
           domain:
             - light
             - switch
-    timeout:
-      name: Timeout (Seconds)
-      description: How long the light/switch should stay on before turning off if no motion is detected.
-      default: 60
-      selector:
-        number:
-          min: 10
-          max: 600
-          unit_of_measurement: seconds
-          step: 10
-    auto_turn_on:
-      name: Auto Turn On
-      description: If enabled, the light/switch will automatically turn on when motion is detected.
+
+    auto_on_enabled:
+      name: Auto-On Enabled
+      description: Enable or disable auto-on functionality.
       default: true
       selector:
         boolean: {}
 
-trigger:
-  - platform: state
-    entity_id: !input motion_sensors
-    to: "on"
+    timeout:
+      name: Auto-Off Timeout
+      description: Time in seconds before the light or switch is turned off after no motion is detected.
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: seconds
+          mode: slider
 
-action:
-  - choose:
-      - conditions:
-          - condition: state
-            entity_id: !input auto_turn_on
-            state: "true"
-        sequence:
-          - service: >
-              {% if is_state('!input light_or_switch', 'on') %}
-                light.turn_on
-              {% else %}
-                switch.turn_on
-              {% endif %}
-            target:
-              entity_id: !input light_or_switch
-  - wait_for_trigger:
-      - platform: state
-        entity_id: !input motion_sensors
-        to: "off"
-  - delay:
-      seconds: !input timeout
-  - service: >
-      {% if is_state('!input light_or_switch', 'on') %}
-        light.turn_off
-      {% else %}
-        switch.turn_off
-      {% endif %}
-    target:
-      entity_id: !input light_or_switch
+  trigger:
+    - platform: state
+      entity_id: !input motion_sensors
+      to: 'on'
 
-mode: restart
+  condition:
+    - condition: template
+      value_template: "{{ not (states('input_boolean.auto_on_enabled') == 'off' and states('binary_sensor.motion') == 'off') }}"
+
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.auto_on_enabled
+              state: 'on'
+          sequence:
+            - service: light.turn_on
+              target:
+                entity_id: !input target_entity
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.auto_on_enabled
+              state: 'off'
+          sequence:
+            - service: turn_off
