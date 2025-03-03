@@ -1,0 +1,66 @@
+blueprint:
+  name: Motion-Activated Light or Switch
+  description: Turn on light or switch when motion is detected and reset the timer with new motion.
+  domain: automation
+  input:
+    motion_sensor:
+      name: Motion Sensor
+      description: The motion sensor to trigger the automation.
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    light_or_switch:
+      name: Light or Switch
+      description: The light or switch to turn on.
+      selector:
+        entity:
+          domain:
+            - light
+            - switch
+    timeout:
+      name: Timeout (Seconds)
+      description: How long the light/switch should stay on before turning off if no motion is detected.
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 600
+          unit_of_measurement: seconds
+          step: 10
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+    
+condition:
+  - condition: state
+    entity_id: !input light_or_switch
+    state: "off"
+
+action:
+  - service: >
+      {% if is_state('!input light_or_switch', 'on') %}
+        light.turn_on
+      {% else %}
+        switch.turn_on
+      {% endif %}
+    target:
+      entity_id: !input light_or_switch
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input motion_sensor
+        to: "off"
+  - delay: 
+      seconds: !input timeout
+  - service: >
+      {% if is_state('!input light_or_switch', 'on') %}
+        light.turn_off
+      {% else %}
+        switch.turn_off
+      {% endif %}
+    target:
+      entity_id: !input light_or_switch
+
+mode: restart
