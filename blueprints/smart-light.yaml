@@ -1,0 +1,73 @@
+blueprint:
+  name: Smart Light Control
+  description: Automatically turn off a light after a timeout, reset on motion.
+  domain: automation
+  input:
+    target_light:
+      name: Light or Switch
+      description: The entity to control.
+      selector:
+        entity:
+          domain: [light, switch]
+    motion_sensor:
+      name: Motion Sensor (Optional)
+      description: Motion sensor to reset timeout.
+      default: ''
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    timeout:
+      name: Timeout Duration
+      description: Time before the light turns off automatically.
+      default: 300
+      selector:
+        number:
+          min: 10
+          max: 3600
+          unit_of_measurement: seconds
+
+automation:
+  - alias: Smart Light Control Automation
+    trigger:
+      - platform: state
+        entity_id: !input target_light
+        to: 'on'
+      - platform: state
+        entity_id: !input motion_sensor
+        to: 'on'
+    condition: []
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: !input motion_sensor
+                state: 'on'
+            sequence:
+              - service: timer.start
+                target:
+                  entity_id: timer.light_timeout
+        default:
+          - service: timer.start
+            target:
+              entity_id: timer.light_timeout
+  - alias: Turn Off Light on Timeout
+    trigger:
+      - platform: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.light_timeout
+    action:
+      - service: homeassistant.turn_off
+        target:
+          entity_id: !input target_light
+      - delay: '00:01:00'
+      - condition: state
+        entity_id: !input motion_sensor
+        state: 'on'
+      - service: homeassistant.turn_on
+        target:
+          entity_id: !input target_light
+      - service: timer.start
+        target:
+          entity_id: timer.light_timeout
