@@ -1,0 +1,82 @@
+blueprint:
+  name: Light with Timer and Motion Sensor Reset
+  description: >
+    Automatically turn off a light or switch after a configurable timeout.
+    Reset the timer with motion sensor activity. If motion is detected within
+    60 seconds of turning off, the light will turn back on and the timer will restart.
+  domain: automation
+  input:
+    light_entity:
+      name: Light or Switch
+      description: The light or switch to control
+      selector:
+        entity:
+          domain:
+             - light
+             - switch
+    motion_sensor:
+      name: Motion Sensor
+      description: The motion sensor to reset the timer
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    timeout:
+      name: Timeout
+      description: Time in seconds before the light or switch is turned off
+      default: 300
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: seconds
+
+variables:
+  light_entity: !input light_entity
+  motion_sensor: !input motion_sensor
+  timeout: !input timeout
+
+trigger:
+  - platform: state
+    entity_id: !input light_entity
+    to: 'on'
+  - platform: state
+    entity_id: !input motion_sensor
+    to: 'on'
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: !input light_entity
+            state: 'on'
+        sequence:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input motion_sensor
+                to: 'on'
+              - platform: state
+                entity_id: !input light_entity
+                to: 'off'
+                for:
+                  seconds: !input timeout
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input light_entity
+                    state: 'off'
+                  - condition: state
+                    entity_id: !input motion_sensor
+                    state: 'on'
+                sequence:
+                  - service: homeassistant.turn_on
+                    target:
+                      entity_id: !input light_entity
+                  - delay:
+                      seconds: 60
+          - service: homeassistant.turn_off
+            target:
+              entity_id: !input light_entity
+    default: []
