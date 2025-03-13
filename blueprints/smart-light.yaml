@@ -1,73 +1,122 @@
 blueprint:
-  name: Smart Light Control
-  description: Automatically turn off a light after a timeout, reset on motion.
+  name: Motion-Activated Light with Manual Override and Auto Reactivation
+  description: |
+    Controls a light or switch with manual override, motion detection, and configurable timeout.
+    When manually turned on, a timer starts, turning off the light after the timeout.
+    If motion is detected (optional), the timer resets.
+    If the timer expires and motion is detected within 60 seconds, the light turns back on.
   domain: automation
   input:
-    target_light:
+    light_entity:
       name: Light or Switch
-      description: The entity to control.
+      description: The light or switch to control.
       selector:
         entity:
-          domain: [light, switch]
+          domain: light
+          multiple: false
     motion_sensor:
       name: Motion Sensor (Optional)
-      description: Motion sensor to reset timeout.
-      default: ''
+      description: The motion sensor to trigger the light.
       selector:
         entity:
           domain: binary_sensor
           device_class: motion
+          multiple: false
+          allow_empty: true
     timeout:
       name: Timeout Duration
-      description: Time before the light turns off automatically.
-      default: 300
+      description: Time to wait before turning off the light (minutes).
+      selector:
+        time:
+          input: minutes
+    reactivation_window:
+      name: Reactivation Window
+      description: Time window (seconds) to reactivate after timeout if motion is detected.
+      default: 60
       selector:
         number:
-          min: 10
-          max: 3600
+          min: 1
+          max: 300
           unit_of_measurement: seconds
+          mode: slider
+          step: 1
 
-automation:
-  - alias: Smart Light Control Automation
-    trigger:
-      - platform: state
-        entity_id: !input target_light
-        to: 'on'
-      - platform: state
-        entity_id: !input motion_sensor
-        to: 'on'
-    condition: []
-    action:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: !input motion_sensor
-                state: 'on'
-            sequence:
-              - service: timer.start
-                target:
-                  entity_id: timer.light_timeout
-        default:
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input light_entity
+    to: "on"
+    id: "manual_on"
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+    id: "motion"
+  - platform: event
+    event_type: timer.finished
+    event_data:
+      entity_id: "timer.light_timeout"
+    id: "timeout"
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "manual_on"
+        sequence:
           - service: timer.start
             target:
               entity_id: timer.light_timeout
-  - alias: Turn Off Light on Timeout
-    trigger:
-      - platform: event
-        event_type: timer.finished
-        event_data:
-          entity_id: timer.light_timeout
-    action:
-      - service: homeassistant.turn_off
-        target:
-          entity_id: !input target_light
-      - delay: '00:01:00'
-      - condition: state
-        entity_id: !input motion_sensor
-        state: 'on'
-      - service: homeassistant.turn_on
-        target:
-          entity_id: !input target_light
-      - service: timer.start
-        target:
-          entity_id: timer.light_timeout
+            data:
+              duration: !input timeout
+      - conditions:
+          - condition: trigger
+            id: "motion"
+          - condition: template
+            value_template: "{{ motion_sensor != None }}"
+        sequence:
+          - service: timer.start
+            target:
+              entity_id: timer.light_timeout
+            data:
+              duration: !input timeout
+      - conditions:
+          - condition: trigger
+            id: "timeout"
+        sequence:
+          - service: light.turn_off
+            target:
+              entity_id: !input light_entity
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input motion_sensor
+                to: "on"
+            timeout:
+              seconds: !input reactivation_window
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ wait.trigger }}"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_entity
+                  - service: timer.start
+                    target:
+                      entity_id: timer.light_timeout
+                    data:
+                      duration: !input timeout
+  - service: timer.cancel
+    target:
+      entity_id: timer.light_timeout
+    enabled: "{{ trigger.id not in ['manual_on', 'motion', 'timeout'] }}"
+
+variables:
+  motion_sensor: !input motion_sensor
+  light_entity: !input light_entity
+  timeout: !input timeout
+
+timer:
+  light_timeout:
+    name: Light Timeout
+    duration: 00:00:00
